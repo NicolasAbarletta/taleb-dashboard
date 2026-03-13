@@ -1,0 +1,19 @@
+# Core
+anthropic>=0.40.0
+streamlit>=1.35.0
+python-dotenv>=1.0.0
+
+# Data
+yfinance>=0.2.40
+requests>=2.31.0
+pandas>=2.1.0
+numpy>=1.26.0
+
+# Charts
+plotly>=5.20.0
+
+# Scheduling
+schedule>=1.2.1
+
+# Utilities
+pytz>=2024.1

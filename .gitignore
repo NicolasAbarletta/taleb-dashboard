@@ -1,0 +1,7 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+market_data.db
+agent.log
+*.db-journal
