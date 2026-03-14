@@ -185,6 +185,18 @@ hr { border:none; height:1px; background:linear-gradient(90deg,transparent,#1a25
 /* === NARRATIVE === */
 .narr { background:#090d18; border:1px solid #1a2540; border-radius:8px; padding:11px 16px; font-size:13px; color:#64748b; line-height:1.7; margin-bottom:20px; }
 
+/* === HELPER TEXT === */
+.help-micro { font-size:9px; color:#374151; text-transform:none; letter-spacing:0; margin-top:1px; font-weight:400; }
+.help-inline { font-size:11px; color:#475569; font-style:italic; margin-top:2px; }
+.help-block { background:#090d18; border:1px solid #1a2540; border-radius:8px; padding:10px 14px; font-size:12px; color:#64748b; line-height:1.7; margin:6px 0 12px; }
+
+/* === GUIDE === */
+.guide-section { margin-bottom:14px; }
+.guide-title { font-size:13px; font-weight:700; color:#94a3b8; margin-bottom:6px; }
+.guide-text { font-size:12px; color:#64748b; line-height:1.7; }
+.guide-term { display:inline-block; background:#0d1424; border:1px solid #1a2540; border-radius:6px; padding:3px 10px; margin:3px 4px 3px 0; font-size:11px; color:#94a3b8; }
+.guide-term b { color:#cbd5e1; }
+
 /* === LOG ROW === */
 .log-r { font-family:monospace; font-size:11px; color:#374151; padding:3px 0; border-bottom:1px solid #0f1829; }
 
@@ -383,15 +395,16 @@ def _render_trade_card(trade, position_size, idx=0):
       <div class="sc-t" style="width:{t}%"></div>
     </div>
     <div class="sbar-legend">
-      <span class="lc">Convexity {c}</span>
-      <span class="la">Antifragility {a}</span>
-      <span class="lf">Fragility {f}</span>
-      <span class="lt">Tail Risk {t}</span>
+      <span class="lc">Asymmetry {c}</span>
+      <span class="la">Strength {a}</span>
+      <span class="lf">Avoids Crowds {f}</span>
+      <span class="lt">Black Swan {t}</span>
     </div>
   </div>
   <div style="margin-top:16px">
     <span class="{act_cls}">{action}</span>
     <span style="color:#374151;font-size:13px;margin-left:12px">@ ${price:.2f}</span>
+    <span style="color:#475569;font-size:11px;margin-left:8px">{"Betting price goes UP" if "CALL" in action else ("Betting price goes DOWN" if "PUT" in action else "Buy the asset directly")}</span>
   </div>
 </div>""", unsafe_allow_html=True)
 
@@ -403,15 +416,15 @@ def _render_trade_card(trade, position_size, idx=0):
         st.markdown(f"""
 <div class="opt-box">
   <div class="opt-grid">
-    <div><div class="opt-lbl">Strike</div><div class="opt-gold">${trade['strike']:.2f}</div></div>
-    <div><div class="opt-lbl">Expiry</div><div class="opt-val">{trade['expiry']}</div></div>
-    <div><div class="opt-lbl">Premium</div><div class="opt-val">${trade['premium']:.2f}</div></div>
-    <div><div class="opt-lbl">DTE</div><div class="opt-val">{dte}d</div></div>
+    <div><div class="opt-lbl">Strike</div><div class="opt-gold">${trade['strike']:.2f}</div><div class="help-micro">Price option activates</div></div>
+    <div><div class="opt-lbl">Expiry</div><div class="opt-val">{trade['expiry']}</div><div class="help-micro">Option deadline</div></div>
+    <div><div class="opt-lbl">Premium</div><div class="opt-val">${trade['premium']:.2f}</div><div class="help-micro">Cost per share (x100)</div></div>
+    <div><div class="opt-lbl">DTE</div><div class="opt-val">{dte}d</div><div class="help-micro">Days until expiry</div></div>
   </div>
   <div class="opt-sep">
-    <div><div class="opt-lbl">1 Contract</div><div class="opt-val">${cost_1:.0f}</div></div>
-    <div><div class="opt-lbl">{n} Contracts (${position_size})</div><div class="opt-val">${n * cost_1:.0f}</div></div>
-    <div><div class="opt-lbl">Delta / Vega</div><div class="opt-val">{trade['delta']:.3f} / {trade['vega']:.3f}</div></div>
+    <div><div class="opt-lbl">1 Contract</div><div class="opt-val">${cost_1:.0f}</div><div class="help-micro">Minimum trade cost</div></div>
+    <div><div class="opt-lbl">{n} Contracts (${position_size})</div><div class="opt-val">${n * cost_1:.0f}</div><div class="help-micro">Your actual cost</div></div>
+    <div><div class="opt-lbl">Delta / Vega</div><div class="opt-val">{trade['delta']:.3f} / {trade['vega']:.3f}</div><div class="help-micro">Price / volatility sensitivity</div></div>
   </div>
 </div>""", unsafe_allow_html=True)
 
@@ -421,7 +434,7 @@ def _render_trade_card(trade, position_size, idx=0):
     # Expandable sections
     col_a, col_b = st.columns(2)
     with col_a:
-        with st.expander("Trigger Checklist"):
+        with st.expander("Trigger Checklist -- What Needs to Happen"):
             try:
                 triggers = json.loads(trade["triggers"]) if trade["triggers"] else []
             except Exception:
@@ -432,14 +445,15 @@ def _render_trade_card(trade, position_size, idx=0):
             else:
                 st.markdown('<span style="color:#374151">No triggers defined.</span>', unsafe_allow_html=True)
 
-        with st.expander("Risk Reality Check"):
+        with st.expander("Risk Reality Check -- Honest Odds"):
             if trade["risk_check"]:
                 st.markdown(f'<div class="risk-box">{trade["risk_check"]}</div>', unsafe_allow_html=True)
             else:
                 st.markdown('<span style="color:#374151">No risk data.</span>', unsafe_allow_html=True)
 
     with col_b:
-        with st.expander("P&L Scenarios"):
+        with st.expander("P&L Scenarios -- What Could Happen"):
+            st.markdown('<div class="help-inline">Your money in 5 different market outcomes, from worst to best case.</div>', unsafe_allow_html=True)
             try:
                 scenarios = json.loads(trade["pnl_scenarios"]) if trade["pnl_scenarios"] else []
             except Exception:
@@ -472,7 +486,8 @@ def _render_trade_card(trade, position_size, idx=0):
             else:
                 st.markdown('<span style="color:#374151">No scenario data.</span>', unsafe_allow_html=True)
 
-        with st.expander("Payoff Chart"):
+        with st.expander("Payoff Chart -- Visual Map"):
+            st.markdown('<div class="help-inline">Green = profit zone, Red = loss zone. Hover to see exact P&L at any price.</div>', unsafe_allow_html=True)
             opt_type = "call" if "CALL" in (action or "") else "put"
             _render_payoff_chart(trade["ticker"], trade["strike"], trade["expiry"],
                                  trade["premium"], opt_type, price, position_size)
@@ -486,6 +501,15 @@ SERIES_LABELS = {
     "fed_funds_rate": "Fed Funds", "baa_aaa_spread": "Credit Spread",
     "ted_spread": "TED Spread", "yield_curve_10y2y": "Yield Curve 10Y-2Y",
     "unemployment_claims": "Jobless Claims", "vix": "VIX",
+}
+
+SERIES_HELP = {
+    "fed_funds_rate": "Central bank interest rate",
+    "baa_aaa_spread": "Fear premium in corporate bonds",
+    "ted_spread": "Bank lending stress",
+    "yield_curve_10y2y": "Negative = recession warning",
+    "unemployment_claims": "Weekly layoff filings",
+    "vix": "Market fear gauge (higher = more fear)",
 }
 
 
@@ -566,13 +590,15 @@ def main():
     with h1:
         st.markdown(
             "<div style='font-size:28px;font-weight:900;letter-spacing:3px;color:#f1f5f9;line-height:1'>TALEB TRADE ADVISOR</div>"
-            "<div style='font-size:10px;color:#374151;letter-spacing:2px;text-transform:uppercase;margin-top:4px'>Convexity &nbsp;|&nbsp; Antifragility &nbsp;|&nbsp; Tail Risk</div>",
+            "<div style='font-size:10px;color:#475569;letter-spacing:0.5px;margin-top:6px'>AI-powered market scanner finding cheap bets with massive upside potential</div>",
             unsafe_allow_html=True,
         )
+    stress_explain = {"RED": "Multiple stress signals -- high alert", "YELLOW": "Some signals flashing -- stay alert", "GREEN": "Low stress -- good time to buy cheap protection"}[stress_level]
     with h2:
         st.markdown(
             f'<div style="font-size:10px;color:#374151;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px">Macro Stress</div>'
-            f'<span class="{stress_pill}">{stress_icon}</span>',
+            f'<span class="{stress_pill}">{stress_icon}</span>'
+            f'<div style="font-size:10px;color:#374151;margin-top:5px">{stress_explain}</div>',
             unsafe_allow_html=True,
         )
     with h3:
@@ -593,10 +619,50 @@ def main():
 
     st.markdown(f'<div class="narr">{narrative}</div>', unsafe_allow_html=True)
 
+    # ── HOW THIS WORKS GUIDE ─────────────────────────────────────────────────
+    with st.expander("How This Works -- Click to Learn"):
+        st.markdown("""
+<div class="guide-section">
+  <div class="guide-title">What is this dashboard?</div>
+  <div class="guide-text">
+    An AI agent scans 33 assets (stocks, ETFs, commodities) every 30 minutes and scores each one based on
+    Nassim Taleb's investment philosophy: find cheap bets where you risk a little but could gain a lot.
+    The top 10 opportunities are shown below as actionable trade ideas.
+  </div>
+</div>
+<div class="guide-section">
+  <div class="guide-title">How to read a trade card</div>
+  <div class="guide-text">
+    Each card shows one trade idea. The <b style="color:#cbd5e1">score (0-100)</b> tells you how well it fits the strategy.
+    Higher is better. The colored bar breaks the score into 4 dimensions:<br>
+    <span style="color:#d4a017">Asymmetry</span> = small cost, big potential payoff |
+    <span style="color:#10b981">Strength</span> = benefits from chaos |
+    <span style="color:#3b82f6">Avoids Crowds</span> = not a popular/obvious trade |
+    <span style="color:#f43f5e">Black Swan Upside</span> = profits from extreme events<br><br>
+    <b style="color:#34d399">BUY CALL</b> = betting the price goes UP |
+    <b style="color:#f87171">BUY PUT</b> = betting the price goes DOWN |
+    <b style="color:#a5b4fc">BUY</b> = buy the asset directly
+  </div>
+</div>
+<div class="guide-section">
+  <div class="guide-title">Key terms explained</div>
+  <div class="guide-text">
+    <span class="guide-term"><b>Strike</b> -- Price the option activates at</span>
+    <span class="guide-term"><b>Premium</b> -- Cost per share (x100 for one contract)</span>
+    <span class="guide-term"><b>DTE</b> -- Days until the option expires</span>
+    <span class="guide-term"><b>Delta</b> -- How much the option moves per $1 of stock movement</span>
+    <span class="guide-term"><b>Vega</b> -- How much the option gains when fear/volatility rises</span>
+    <span class="guide-term"><b>VIX</b> -- The market's "fear gauge" (higher = more fear)</span>
+    <span class="guide-term"><b>Yield Curve</b> -- Recession signal (negative = warning)</span>
+    <span class="guide-term"><b>OTM</b> -- "Out of the money" = cheap option that needs a big move to pay off</span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
     # ── POSITION SIZE ────────────────────────────────────────────────────────
     position_size = st.slider(
-        "Risk per trade ($)", 100, 5000, 500, 50,
-        help="All P&L tables and payoff charts update dynamically",
+        "How much to risk per trade ($)", 100, 5000, 500, 50,
+        help="Drag to adjust. All profit/loss tables and charts below update automatically to show your real dollar amounts.",
     )
     st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
 
@@ -640,9 +706,10 @@ def main():
                 val_str = (f"{val/1000:.0f}k" if key == "unemployment_claims" and val
                            else (f"{val:.2f}%" if val is not None else "N/A"))
                 z_str = f" z={z:.1f}" if z is not None else ""
+                help_txt = SERIES_HELP.get(key, "")
                 st.markdown(
                     f'<div class="mac-row">'
-                    f'<span class="mac-lbl">{label}</span>'
+                    f'<div><span class="mac-lbl">{label}</span><div class="help-micro">{help_txt}</div></div>'
                     f'<span class="mac-val {flag_cls}">{val_str}<span style="font-size:10px;color:#374151"> {z_str}</span></span>'
                     f'</div>',
                     unsafe_allow_html=True,
@@ -661,6 +728,7 @@ def main():
         if trades and len(trades) > 1:
             st.markdown("---")
             st.markdown('<div class="sec-h">Portfolio Simulator</div>', unsafe_allow_html=True)
+            st.markdown('<div class="help-block">If you placed all trades below with your selected risk amount, here is the combined picture. Max Loss is the absolute worst case (all options expire worthless). Base Case assumes moderate moves in your favor.</div>', unsafe_allow_html=True)
             total_cost = 0
             total_base = 0
             tickers = []
