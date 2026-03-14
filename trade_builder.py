@@ -356,8 +356,9 @@ def build_trades(conn, run_id: str, position_size: float = 500.0) -> list[TradeR
                es.week52_position, es.iv_30d, es.beta
         FROM taleb_scores ts
         LEFT JOIN equity_snapshots es ON ts.ticker = es.ticker AND ts.run_id = es.run_id
-        WHERE ts.run_id = ? AND ts.total_score >= 50
+        WHERE ts.run_id = ? AND ts.total_score >= 40
         ORDER BY ts.total_score DESC
+        LIMIT 10
     """, (run_id,)).fetchall()
 
     if not rows:

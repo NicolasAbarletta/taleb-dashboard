@@ -300,7 +300,7 @@ def score_all(conn, run_id: str | None = None) -> list[Score]:
         f, fd = _score_fragility(s, macro)
         t, td = _score_tail_risk(s)
         total = c + a + f + t
-        tier = "HIGH" if total >= 75 else ("WATCH" if total >= 50 else "IGNORE")
+        tier = "HIGH" if total >= 65 else ("WATCH" if total >= 40 else "IGNORE")
         cat = _catalyst(s, macro)
 
         sc = Score(

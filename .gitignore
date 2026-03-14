@@ -5,3 +5,6 @@ __pycache__/
 market_data.db
 agent.log
 *.db-journal
+*.db-shm
+*.db-wal
+.claude/

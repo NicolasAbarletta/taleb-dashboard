@@ -1,17 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-dashboard.py -- Streamlit Live Dashboard (Cloud-Ready)
-========================================================
-Works both locally (with run.py) and on Streamlit Community Cloud.
-When no data exists, triggers an inline fetch with a spinner.
-Cached for 30 minutes via st.cache_data.
+dashboard.py -- Streamlit Live Dashboard (Premium v3)
+======================================================
+Works locally (with run.py) and on Streamlit Community Cloud.
 """
 
 import json
 import os
 import sqlite3
-import time
 import logging
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -20,63 +18,182 @@ import streamlit as st
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
-
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s -- %(message)s")
 
 DB_PATH = "market_data.db"
-REFRESH_SEC = 300
 
-# ── Secrets: support both .env and st.secrets (for Streamlit Cloud) ──────────
 
 def _get_secret(key: str) -> str:
-    """Try st.secrets first (cloud), then os.getenv (.env / local)."""
     try:
         return st.secrets.get(key, "") or os.getenv(key, "")
     except Exception:
         return os.getenv(key, "")
 
 
-# ── Page config ──────────────────────────────────────────────────────────────
+# ── Page config ───────────────────────────────────────────────────────────────
 
-st.set_page_config(page_title="Taleb Trade Advisor", page_icon="@", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(
+    page_title="Taleb Trade Advisor",
+    page_icon="T",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 
-# ── CSS ──────────────────────────────────────────────────────────────────────
+# ── Premium CSS ───────────────────────────────────────────────────────────────
 
-st.markdown("""
-<style>
-/* Force all text to be readable on dark background */
-[data-testid="stAppViewContainer"] { background-color: #0a0a0a; color: #e8e8e8; }
-[data-testid="stSidebar"] { background-color: #0f0f0f; color: #e0e0e0; }
-[data-testid="stAppViewContainer"] p, [data-testid="stAppViewContainer"] span,
-[data-testid="stAppViewContainer"] label, [data-testid="stAppViewContainer"] div,
-[data-testid="stSidebar"] p, [data-testid="stSidebar"] span,
-[data-testid="stSidebar"] label, [data-testid="stSidebar"] div { color: #e0e0e0; }
-[data-testid="stAppViewContainer"] h1, [data-testid="stAppViewContainer"] h2,
-[data-testid="stAppViewContainer"] h3, [data-testid="stAppViewContainer"] h4 { color: #f0f0f0; }
-[data-testid="stMetricValue"] { color: #ffffff !important; }
-[data-testid="stMetricLabel"] { color: #bbbbbb !important; }
-[data-testid="stMarkdownContainer"] p { color: #dddddd; }
-[data-testid="stExpander"] summary { color: #cccccc !important; }
-[data-testid="stExpander"] summary span { color: #cccccc !important; }
-.stSlider label { color: #cccccc !important; }
-.stCheckbox label span { color: #cccccc !important; }
-/* Streamlit dataframe header and cells */
-[data-testid="stDataFrame"] { color: #e0e0e0; }
-/* Cards */
-.card-high { background: linear-gradient(135deg,#1a1400,#2a2000); border:1px solid #b8860b; border-radius:10px; padding:18px 22px; margin-bottom:16px; }
-.card-watch { background: linear-gradient(135deg,#0a0a1a,#0d0d2a); border:1px solid #1e3a8a; border-radius:10px; padding:18px 22px; margin-bottom:16px; }
-.badge-high { background:#b8860b; color:#000; font-weight:700; padding:3px 12px; border-radius:12px; font-size:12px; }
-.badge-watch { background:#1e3a8a; color:#fff; font-weight:700; padding:3px 12px; border-radius:12px; font-size:12px; }
-.trade-ticket { background:#151515; border:1px solid #444; border-radius:8px; padding:14px; margin:8px 0; font-family:monospace; color:#e0e0e0; }
-.action-buy { color:#00ff88; font-size:20px; font-weight:800; letter-spacing:1px; }
-.action-sell { color:#ff4466; font-size:20px; font-weight:800; letter-spacing:1px; }
-.thesis-text { font-style:italic; color:#dddddd; font-size:14px; line-height:1.6; margin:8px 0; }
-.risk-box { background:#1a0a0a; border-left:3px solid #ff4444; padding:10px 14px; margin:8px 0; font-size:13px; color:#ffaaaa; }
-.stress-red { color:#ff5555; font-weight:700; } .stress-yellow { color:#ffcc44; font-weight:700; } .stress-green { color:#22dd77; font-weight:700; }
-.section-hdr { font-size:12px; color:#999999; text-transform:uppercase; letter-spacing:1.5px; margin-bottom:6px; }
-.log-row { font-family:monospace; font-size:11px; color:#aaaaaa; border-bottom:1px solid #222; padding:3px 0; }
-</style>
-""", unsafe_allow_html=True)
+st.markdown("""<style>
+/* === GLOBAL === */
+html, body { background:#07090f; }
+[data-testid="stAppViewContainer"] { background:#07090f; }
+[data-testid="stAppViewContainer"] > .main { background:#07090f; }
+[data-testid="stSidebar"] { background:#0a0e1a; border-right:1px solid #1a2540; }
+section[data-testid="stSidebar"] > div { background:#0a0e1a; }
+
+/* === TEXT === */
+[data-testid="stAppViewContainer"] p,
+[data-testid="stAppViewContainer"] span,
+[data-testid="stAppViewContainer"] label,
+[data-testid="stAppViewContainer"] div,
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] span,
+[data-testid="stSidebar"] label { color:#cbd5e1; }
+[data-testid="stAppViewContainer"] h1,
+[data-testid="stAppViewContainer"] h2,
+[data-testid="stAppViewContainer"] h3 { color:#f1f5f9; }
+[data-testid="stMetricValue"] { color:#f1f5f9 !important; font-size:26px !important; font-weight:800 !important; }
+[data-testid="stMetricLabel"] { color:#64748b !important; font-size:11px !important; text-transform:uppercase; letter-spacing:1px; }
+[data-testid="stMarkdownContainer"] p { color:#94a3b8; }
+[data-testid="stExpander"] { border:1px solid #1a2540 !important; border-radius:10px !important; overflow:hidden; }
+[data-testid="stExpander"] > div:first-child { background:#090d18 !important; }
+[data-testid="stExpander"] summary { color:#64748b !important; font-size:11px !important; text-transform:uppercase; letter-spacing:1.5px; }
+[data-testid="stExpander"] summary span { color:#64748b !important; }
+.stSlider label { color:#64748b !important; font-size:11px !important; text-transform:uppercase; letter-spacing:1px; }
+[data-testid="stDataFrame"] th { background:#090d18 !important; color:#64748b !important; font-size:11px !important; text-transform:uppercase; }
+[data-testid="stDataFrame"] td { color:#cbd5e1 !important; background:#07090f !important; }
+[data-testid="stCheckbox"] span { color:#64748b !important; }
+[data-baseweb="checkbox"] span[aria-disabled="true"] { color:#64748b !important; }
+
+/* === BUTTON === */
+[data-testid="stButton"] > button {
+  background:transparent; border:1px solid #1a2540; color:#64748b;
+  font-size:10px; text-transform:uppercase; letter-spacing:1.5px;
+  border-radius:6px; padding:5px 16px; transition:all 0.2s;
+}
+[data-testid="stButton"] > button:hover { border-color:#d4a017; color:#d4a017; background:rgba(212,160,23,0.08); }
+
+/* === DIVIDER === */
+hr { border:none; height:1px; background:linear-gradient(90deg,transparent,#1a2540,transparent); margin:24px 0; }
+
+/* === TRADE CARDS === */
+.tcard {
+  background:linear-gradient(150deg,#0b1022,#0f1828);
+  border:1px solid #1a2540;
+  border-radius:16px;
+  padding:24px 26px;
+  margin-bottom:20px;
+  box-shadow:0 8px 40px rgba(0,0,0,0.6);
+  position:relative;
+}
+.tcard-high { border-left:3px solid #d4a017; }
+.tcard-watch { border-left:3px solid #3b82f6; }
+.tcard::after {
+  content:''; position:absolute; top:0; left:0; right:0; height:1px;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,0.04),transparent);
+}
+
+/* === BADGES === */
+.badge-h {
+  background:linear-gradient(90deg,#7a4e0a,#b8860b); color:#fef3c7;
+  padding:3px 14px; border-radius:20px; font-size:10px; font-weight:800;
+  letter-spacing:1px; text-transform:uppercase; border:1px solid rgba(212,160,23,0.4);
+  display:inline-block;
+}
+.badge-w {
+  background:linear-gradient(90deg,#1e3a8a,#2563eb); color:#bfdbfe;
+  padding:3px 14px; border-radius:20px; font-size:10px; font-weight:800;
+  letter-spacing:1px; text-transform:uppercase; border:1px solid rgba(59,130,246,0.4);
+  display:inline-block;
+}
+
+/* === SCORE DISPLAY === */
+.score-num-h { font-size:44px; font-weight:900; color:#d4a017; letter-spacing:-2px; line-height:1; display:inline-block; }
+.score-num-w { font-size:44px; font-weight:900; color:#3b82f6; letter-spacing:-2px; line-height:1; display:inline-block; }
+.score-denom { font-size:16px; color:#374151; font-weight:400; }
+.sbar { height:5px; background:#111827; border-radius:3px; overflow:hidden; display:flex; margin:8px 0 3px; }
+.sbar div { height:100%; }
+.sc-c { background:#d4a017; }
+.sc-a { background:#10b981; }
+.sc-f { background:#3b82f6; }
+.sc-t { background:#f43f5e; }
+.sbar-legend { font-size:10px; }
+.sbar-legend span { margin-right:8px; }
+.lc { color:#d4a017; } .la { color:#10b981; } .lf { color:#3b82f6; } .lt { color:#f43f5e; }
+
+/* === ACTION BADGE === */
+.act-call { display:inline-block; padding:5px 18px; background:rgba(16,185,129,0.1); color:#34d399; border:1px solid rgba(16,185,129,0.3); border-radius:8px; font-weight:800; font-size:13px; letter-spacing:1px; }
+.act-put  { display:inline-block; padding:5px 18px; background:rgba(239,68,68,0.1); color:#f87171; border:1px solid rgba(239,68,68,0.3); border-radius:8px; font-weight:800; font-size:13px; letter-spacing:1px; }
+.act-buy  { display:inline-block; padding:5px 18px; background:rgba(99,102,241,0.1); color:#a5b4fc; border:1px solid rgba(99,102,241,0.3); border-radius:8px; font-weight:800; font-size:13px; letter-spacing:1px; }
+
+/* === OPTION TICKET === */
+.opt-box {
+  background:#060810; border:1px solid #1a2540; border-radius:10px;
+  padding:16px 20px; margin:14px 0; font-family:monospace;
+}
+.opt-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:18px; }
+.opt-lbl { font-size:10px; color:#374151; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; }
+.opt-val { font-size:16px; font-weight:700; color:#e2e8f0; }
+.opt-gold { font-size:16px; font-weight:700; color:#d4a017; }
+.opt-sep { border-top:1px solid #111827; margin-top:14px; padding-top:14px; display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }
+
+/* === THESIS === */
+.thesis {
+  padding:14px 18px; border-left:2px solid #1a2540; margin:14px 0;
+  color:#94a3b8; font-style:italic; font-size:14px; line-height:1.8;
+}
+.thesis-h { border-left-color:rgba(212,160,23,0.5); }
+.thesis-w { border-left-color:rgba(59,130,246,0.4); }
+
+/* === RISK BOX === */
+.risk-box {
+  background:rgba(239,68,68,0.05); border:1px solid rgba(239,68,68,0.15);
+  border-radius:8px; padding:12px 16px; color:#fca5a5; font-size:13px; line-height:1.6;
+}
+
+/* === SECTION HEADERS === */
+.sec-h {
+  font-size:11px; font-weight:700; color:#374151; text-transform:uppercase;
+  letter-spacing:2px; margin:24px 0 14px; padding-bottom:8px;
+  border-bottom:1px solid #111827;
+}
+.sec-h-gold { color:#d4a017; border-bottom-color:rgba(212,160,23,0.2); }
+.sec-h-blue { color:#3b82f6; border-bottom-color:rgba(59,130,246,0.2); }
+
+/* === MACRO PANEL === */
+.mac-row {
+  display:flex; justify-content:space-between; align-items:center;
+  padding:8px 0; border-bottom:1px solid #0f1829;
+}
+.mac-lbl { font-size:12px; color:#64748b; }
+.mac-val { font-size:13px; font-weight:600; }
+.mac-r { color:#f87171; } .mac-y { color:#fbbf24; } .mac-g { color:#34d399; }
+
+/* === STRESS PILL === */
+.pill-r { background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.3); color:#f87171; padding:6px 16px; border-radius:20px; font-weight:700; font-size:13px; display:inline-block; }
+.pill-y { background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.3); color:#fbbf24; padding:6px 16px; border-radius:20px; font-weight:700; font-size:13px; display:inline-block; }
+.pill-g { background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.2); color:#34d399; padding:6px 16px; border-radius:20px; font-weight:700; font-size:13px; display:inline-block; }
+
+/* === NARRATIVE === */
+.narr { background:#090d18; border:1px solid #1a2540; border-radius:8px; padding:11px 16px; font-size:13px; color:#64748b; line-height:1.7; margin-bottom:20px; }
+
+/* === LOG ROW === */
+.log-r { font-family:monospace; font-size:11px; color:#374151; padding:3px 0; border-bottom:1px solid #0f1829; }
+
+/* === PORTFOLIO METRICS === */
+[data-testid="metric-container"] {
+  background:#0b1022 !important; border:1px solid #1a2540 !important;
+  border-radius:12px !important; padding:16px 20px !important;
+}
+</style>""", unsafe_allow_html=True)
 
 
 # ── DB + inline data fetch ───────────────────────────────────────────────────
@@ -103,12 +220,6 @@ def _ensure_tables(conn):
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def _run_full_cycle() -> str:
-    """
-    Run data pull + scoring + trade building inline.
-    Cached for 30 minutes so it doesn't re-fetch on every page load.
-    Returns the run_id.
-    """
-    # Inject secrets into env so backend modules pick them up
     for key in ["ANTHROPIC_API_KEY", "FRED_API_KEY", "NEWS_API_KEY"]:
         val = _get_secret(key)
         if val:
@@ -132,7 +243,17 @@ def _latest_run(conn):
 
 
 def _load_trades(conn, run_id):
-    return conn.execute("SELECT * FROM trade_recommendations WHERE run_id=? ORDER BY total_score DESC", (run_id,)).fetchall()
+    return conn.execute("""
+        SELECT tr.id, tr.run_id, tr.created_at, tr.ticker, tr.total_score, tr.conviction_tier,
+               tr.trade_action, tr.instrument, tr.strike, tr.expiry, tr.premium,
+               tr.delta, tr.gamma, tr.vega, tr.underlying_price,
+               tr.thesis, tr.triggers, tr.pnl_scenarios, tr.risk_check, tr.position_pct,
+               ts.convexity_score, ts.antifragility_score,
+               ts.fragility_avoidance, ts.tail_risk_score, ts.catalyst
+        FROM trade_recommendations tr
+        LEFT JOIN taleb_scores ts ON tr.ticker = ts.ticker AND tr.run_id = ts.run_id
+        WHERE tr.run_id=? ORDER BY tr.total_score DESC
+    """, (run_id,)).fetchall()
 
 
 def _load_macro(conn, run_id):
@@ -152,7 +273,15 @@ def _load_log(conn):
     return conn.execute("SELECT * FROM agent_runs ORDER BY started_at DESC LIMIT 10").fetchall()
 
 
-# ── Render: Payoff chart ─────────────────────────────────────────────────────
+def _compute_dte(expiry_str):
+    try:
+        exp = datetime.strptime(expiry_str, "%Y-%m-%d").date()
+        return max(0, (exp - datetime.now().date()).days)
+    except Exception:
+        return 0
+
+
+# ── Render: Payoff chart ──────────────────────────────────────────────────────
 
 def _render_payoff_chart(ticker, strike, expiry, premium, opt_type, price, position_size):
     from trade_builder import OptionLeg, build_payoff_curve
@@ -162,156 +291,232 @@ def _render_payoff_chart(ticker, strike, expiry, premium, opt_type, price, posit
                         premium=premium, delta=0, gamma=0, vega=0, dte=30)
     curve = build_payoff_curve(opt, price, position_size)
 
-    fig = go.Figure()
     prices_arr, pnl_arr = curve["prices"], curve["pnl"]
     pos_pnl = [max(0, p) for p in pnl_arr]
     neg_pnl = [min(0, p) for p in pnl_arr]
 
-    fig.add_trace(go.Scatter(x=prices_arr, y=pos_pnl, fill='tozeroy', fillcolor='rgba(0,200,100,0.15)',
-                             line=dict(width=0), showlegend=False, hoverinfo='skip'))
-    fig.add_trace(go.Scatter(x=prices_arr, y=neg_pnl, fill='tozeroy', fillcolor='rgba(255,60,60,0.15)',
-                             line=dict(width=0), showlegend=False, hoverinfo='skip'))
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=prices_arr, y=pos_pnl, fill='tozeroy',
+                             fillcolor='rgba(16,185,129,0.12)', line=dict(width=0),
+                             showlegend=False, hoverinfo='skip'))
+    fig.add_trace(go.Scatter(x=prices_arr, y=neg_pnl, fill='tozeroy',
+                             fillcolor='rgba(239,68,68,0.12)', line=dict(width=0),
+                             showlegend=False, hoverinfo='skip'))
     fig.add_trace(go.Scatter(x=prices_arr, y=pnl_arr, mode='lines', name='P&L',
-                             line=dict(color='#5599ff', width=2.5)))
-    fig.add_vline(x=curve["current_price"], line_dash="dot", line_color="#ffffff", line_width=1,
-                  annotation_text=f"Current ${curve['current_price']:.2f}", annotation_font_color="#aaa")
-    fig.add_vline(x=curve["breakeven"], line_dash="dash", line_color="#ffbb33", line_width=1,
-                  annotation_text=f"BE ${curve['breakeven']:.2f}", annotation_font_color="#ffbb33",
+                             line=dict(color='#60a5fa', width=2.5),
+                             hovertemplate='$%{x:.2f} → %{y:+.0f}<extra></extra>'))
+    fig.add_vline(x=curve["current_price"], line_dash="dot", line_color="#475569", line_width=1,
+                  annotation_text=f"Now ${curve['current_price']:.2f}",
+                  annotation_font=dict(color="#64748b", size=11))
+    fig.add_vline(x=curve["breakeven"], line_dash="dash", line_color="#f59e0b", line_width=1,
+                  annotation_text=f"BE ${curve['breakeven']:.2f}",
+                  annotation_font=dict(color="#f59e0b", size=11),
                   annotation_position="top left")
-    fig.add_hline(y=0, line_color="#444", line_width=1)
-    fig.update_layout(title=f"{ticker} Payoff at Expiration",
-                      xaxis_title="Underlying Price ($)", yaxis_title="Profit / Loss ($)",
-                      plot_bgcolor="#0a0a0a", paper_bgcolor="#0a0a0a", font_color="#ccc",
-                      height=320, margin=dict(l=10, r=10, t=40, b=10),
-                      xaxis=dict(showgrid=True, gridcolor="#1a1a1a"),
-                      yaxis=dict(showgrid=True, gridcolor="#1a1a1a"))
+    if strike:
+        fig.add_vline(x=strike, line_dash="dot", line_color="#374151", line_width=1)
+    fig.add_hline(y=0, line_color="#1e2a3a", line_width=1)
+    dte_label = f" | {_compute_dte(expiry)}d to exp" if expiry else ""
+    fig.update_layout(
+        title=dict(text=f"{ticker} Payoff{dte_label}", font=dict(color="#94a3b8", size=13)),
+        xaxis_title="Underlying Price ($)", yaxis_title="P&L ($)",
+        plot_bgcolor="#07090f", paper_bgcolor="#07090f",
+        font=dict(color="#64748b", size=11),
+        height=300, margin=dict(l=10, r=10, t=40, b=10),
+        xaxis=dict(showgrid=True, gridcolor="#0f1829", color="#64748b"),
+        yaxis=dict(showgrid=True, gridcolor="#0f1829", color="#64748b"),
+        legend=dict(font=dict(color="#64748b")),
+    )
     st.plotly_chart(fig, use_container_width=True, key=f"payoff_{ticker}")
 
 
-# ── Render: Trade card ───────────────────────────────────────────────────────
+# ── Render: Trade card ────────────────────────────────────────────────────────
 
-def _render_trade_card(trade, position_size):
+def _render_trade_card(trade, position_size, idx=0):
     tier = trade["conviction_tier"]
-    card_cls = "card-high" if tier == "HIGH" else "card-watch"
-    badge_cls = "badge-high" if tier == "HIGH" else "badge-watch"
-    tier_label = "HIGH CONVICTION" if tier == "HIGH" else "WATCH LIST"
-    action_cls = "action-sell" if "PUT" in (trade["trade_action"] or "") or "SELL" in (trade["trade_action"] or "") else "action-buy"
     price = trade["underlying_price"] or 0
+    action = trade["trade_action"] or "BUY"
+    total = trade["total_score"]
 
+    # Sub-scores
+    c = trade.get("convexity_score") or 0
+    a = trade.get("antifragility_score") or 0
+    f = trade.get("fragility_avoidance") or 0
+    t = trade.get("tail_risk_score") or 0
+
+    # Action badge class
+    if "CALL" in action:
+        act_cls = "act-call"
+    elif "PUT" in action:
+        act_cls = "act-put"
+    else:
+        act_cls = "act-buy"
+
+    # Tier
+    card_cls = "tcard tcard-high" if tier == "HIGH" else "tcard tcard-watch"
+    badge_cls = "badge-h" if tier == "HIGH" else "badge-w"
+    score_cls = "score-num-h" if tier == "HIGH" else "score-num-w"
+    tier_label = "HIGH CONVICTION" if tier == "HIGH" else "WATCH LIST"
+    thesis_cls = "thesis thesis-h" if tier == "HIGH" else "thesis thesis-w"
+
+    # Catalyst
+    catalyst = trade.get("catalyst") or ""
+
+    # Card header
     st.markdown(f"""
-    <div class="{card_cls}">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <span style="font-size:24px;font-weight:800;letter-spacing:1px">{trade['ticker']}</span>
-        <span class="{badge_cls}">{tier_label} {trade['total_score']}/100</span>
-      </div>
-    </div>""", unsafe_allow_html=True)
+<div class="{card_cls}">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
+    <div>
+      <div style="font-size:32px;font-weight:900;letter-spacing:2px;color:#f1f5f9;line-height:1">{trade['ticker']}</div>
+      <div style="font-size:11px;color:#374151;text-transform:uppercase;letter-spacing:1px;margin-top:4px">{trade['instrument']}</div>
+      {f'<div style="font-size:12px;color:#64748b;margin-top:6px">{catalyst}</div>' if catalyst else ''}
+    </div>
+    <div style="text-align:right;flex-shrink:0">
+      <div><span class="{score_cls}">{total}</span><span class="score-denom">/100</span></div>
+      <div style="margin-top:6px"><span class="{badge_cls}">{tier_label}</span></div>
+    </div>
+  </div>
+  <div style="margin-top:14px">
+    <div class="sbar">
+      <div class="sc-c" style="width:{c}%"></div>
+      <div class="sc-a" style="width:{a}%"></div>
+      <div class="sc-f" style="width:{f}%"></div>
+      <div class="sc-t" style="width:{t}%"></div>
+    </div>
+    <div class="sbar-legend">
+      <span class="lc">Convexity {c}</span>
+      <span class="la">Antifragility {a}</span>
+      <span class="lf">Fragility {f}</span>
+      <span class="lt">Tail Risk {t}</span>
+    </div>
+  </div>
+  <div style="margin-top:16px">
+    <span class="{act_cls}">{action}</span>
+    <span style="color:#374151;font-size:13px;margin-left:12px">@ ${price:.2f}</span>
+  </div>
+</div>""", unsafe_allow_html=True)
 
-    # Trade ticket
-    opt_info = ""
-    if trade["strike"]:
-        cost_1 = (trade["premium"] or 0) * 100
-        opt_info = f"""
-        Strike: **${trade['strike']:.2f}** | Expiry: **{trade['expiry']}** | Premium: **${trade['premium']:.2f}**/contract
-        Cost: **${cost_1:.0f}** (1 contract) | **${cost_1 * 10:.0f}** (10 contracts)
-        Delta: {trade['delta']:.3f} | Gamma: {trade['gamma']:.4f} | Vega: {trade['vega']:.3f}"""
+    # Option ticket
+    if trade["strike"] and trade["premium"]:
+        cost_1 = round((trade["premium"] or 0) * 100, 2)
+        n = max(1, int(position_size / cost_1)) if cost_1 > 0 else 1
+        dte = _compute_dte(trade["expiry"] or "")
+        st.markdown(f"""
+<div class="opt-box">
+  <div class="opt-grid">
+    <div><div class="opt-lbl">Strike</div><div class="opt-gold">${trade['strike']:.2f}</div></div>
+    <div><div class="opt-lbl">Expiry</div><div class="opt-val">{trade['expiry']}</div></div>
+    <div><div class="opt-lbl">Premium</div><div class="opt-val">${trade['premium']:.2f}</div></div>
+    <div><div class="opt-lbl">DTE</div><div class="opt-val">{dte}d</div></div>
+  </div>
+  <div class="opt-sep">
+    <div><div class="opt-lbl">1 Contract</div><div class="opt-val">${cost_1:.0f}</div></div>
+    <div><div class="opt-lbl">{n} Contracts (${position_size})</div><div class="opt-val">${n * cost_1:.0f}</div></div>
+    <div><div class="opt-lbl">Delta / Vega</div><div class="opt-val">{trade['delta']:.3f} / {trade['vega']:.3f}</div></div>
+  </div>
+</div>""", unsafe_allow_html=True)
 
-    pos_str = ""
-    if trade["strike"] and trade["premium"] and trade["premium"] > 0:
-        n = max(1, int(position_size / (trade["premium"] * 100)))
-        pos_str = f"**{n} contract{'s' if n > 1 else ''}** (${n * trade['premium'] * 100:.0f})"
-    elif price > 0:
-        n = max(1, int(position_size / price))
-        pos_str = f"**{n} shares** (${n * price:.0f})"
-
-    st.markdown(f"""
-    <div class="trade-ticket">
-      <span class="{action_cls}">{trade['trade_action']}</span>
-      <span style="color:#ccc;font-size:14px"> {trade['instrument']}</span><br>
-      <span style="color:#bbb;font-size:13px">Underlying: ${price:.2f} | Position: {pos_str}</span>
-    </div>""", unsafe_allow_html=True)
-
-    if opt_info:
-        st.markdown(opt_info)
     if trade["thesis"]:
-        st.markdown(f'<div class="thesis-text">{trade["thesis"]}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="{thesis_cls}">{trade["thesis"]}</div>', unsafe_allow_html=True)
 
     # Expandable sections
-    with st.expander("Trigger Checklist", expanded=False):
-        try:
-            triggers = json.loads(trade["triggers"]) if trade["triggers"] else []
-        except Exception:
-            triggers = []
-        for trig in triggers:
-            st.checkbox(trig, value=False, key=f"trg_{trade['ticker']}_{hash(trig)}", disabled=True)
+    col_a, col_b = st.columns(2)
+    with col_a:
+        with st.expander("Trigger Checklist"):
+            try:
+                triggers = json.loads(trade["triggers"]) if trade["triggers"] else []
+            except Exception:
+                triggers = []
+            if triggers:
+                for trig in triggers:
+                    st.checkbox(trig, value=False, key=f"trg_{idx}_{hash(trig)}", disabled=True)
+            else:
+                st.markdown('<span style="color:#374151">No triggers defined.</span>', unsafe_allow_html=True)
 
-    with st.expander("P&L Scenarios", expanded=False):
-        try:
-            scenarios = json.loads(trade["pnl_scenarios"]) if trade["pnl_scenarios"] else []
-        except Exception:
-            scenarios = []
-        if scenarios:
-            if trade["strike"] and trade["premium"] and trade["premium"] > 0:
-                contracts = max(1, int(position_size / (trade["premium"] * 100)))
-                cost = contracts * trade["premium"] * 100
+        with st.expander("Risk Reality Check"):
+            if trade["risk_check"]:
+                st.markdown(f'<div class="risk-box">{trade["risk_check"]}</div>', unsafe_allow_html=True)
+            else:
+                st.markdown('<span style="color:#374151">No risk data.</span>', unsafe_allow_html=True)
+
+    with col_b:
+        with st.expander("P&L Scenarios"):
+            try:
+                scenarios = json.loads(trade["pnl_scenarios"]) if trade["pnl_scenarios"] else []
+            except Exception:
+                scenarios = []
+            if scenarios and trade["strike"] and trade["premium"] and trade["premium"] > 0:
                 strike, prem = trade["strike"], trade["premium"]
-                is_call = "CALL" in (trade["trade_action"] or "")
+                contracts = max(1, int(position_size / (prem * 100)))
+                cost = contracts * prem * 100
+                is_call = "CALL" in (action or "")
                 if is_call:
-                    be = strike + prem; bt = strike * 1.10; ht = strike * 1.25
+                    be = strike + prem
+                    bt = strike * 1.10; ht = strike * 1.25
                     bp = max(0, bt - strike) * contracts * 100 - cost
                     hp = max(0, ht - strike) * contracts * 100 - cost
                 else:
-                    be = strike - prem; bt = strike * 0.90; ht = strike * 0.75
+                    be = strike - prem
+                    bt = strike * 0.90; ht = strike * 0.75
                     bp = max(0, strike - bt) * contracts * 100 - cost
                     hp = max(0, strike - ht) * contracts * 100 - cost
-                scenarios = [
-                    {"Scenario": "Total Loss", "What Happens": "Expires worthless", "Your P&L": f"${-cost:+,.0f}", "Return %": "-100%"},
-                    {"Scenario": "Partial Loss", "What Happens": "IV crush / time decay", "Your P&L": f"${-cost*0.5:+,.0f}", "Return %": "-50%"},
-                    {"Scenario": "Break Even", "What Happens": f"At ${be:.2f}", "Your P&L": "$0", "Return %": "0%"},
-                    {"Scenario": "Base Case", "What Happens": f"At ${bt:.2f}", "Your P&L": f"${bp:+,.0f}", "Return %": f"{bp/cost*100:+.0f}%" if cost > 0 else "0%"},
-                    {"Scenario": "Home Run", "What Happens": f"At ${ht:.2f}", "Your P&L": f"${hp:+,.0f}", "Return %": f"{hp/cost*100:+.0f}%" if cost > 0 else "0%"},
+                rows = [
+                    {"Scenario": "Total Loss", "Trigger": "Expires worthless", "P&L": f"${-cost:+,.0f}", "Return": "-100%"},
+                    {"Scenario": "Partial Loss", "Trigger": "IV crush / decay", "P&L": f"${-cost*0.5:+,.0f}", "Return": "-50%"},
+                    {"Scenario": "Break Even", "Trigger": f"${be:.2f}", "P&L": "$0", "Return": "0%"},
+                    {"Scenario": "Base Case", "Trigger": f"${bt:.2f}", "P&L": f"${bp:+,.0f}", "Return": f"{bp/cost*100:+.0f}%" if cost > 0 else "0%"},
+                    {"Scenario": "Home Run", "Trigger": f"${ht:.2f}", "P&L": f"${hp:+,.0f}", "Return": f"{hp/cost*100:+.0f}%" if cost > 0 else "0%"},
                 ]
+                st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+            elif scenarios:
+                st.markdown('<span style="color:#374151">No options data for scenario modeling.</span>', unsafe_allow_html=True)
             else:
-                for s in scenarios:
-                    s["Your P&L"] = f"${s.get('pnl', 0):+,.0f}" if isinstance(s.get("pnl"), (int, float)) else s.get("pnl", "")
-                    s["Return %"] = f"{s.get('return_pct', 0):+.0f}%" if isinstance(s.get("return_pct"), (int, float)) else s.get("return_pct", "")
-                    s["Scenario"] = s.pop("scenario", "")
-                    s["What Happens"] = s.pop("description", "")
-                    s.pop("pnl", None)
-                    s.pop("return_pct", None)
-            st.dataframe(pd.DataFrame(scenarios), hide_index=True, use_container_width=True)
+                st.markdown('<span style="color:#374151">No scenario data.</span>', unsafe_allow_html=True)
 
-    with st.expander("Payoff Chart", expanded=False):
-        opt_type = "call" if "CALL" in (trade["trade_action"] or "") else "put"
-        _render_payoff_chart(trade["ticker"], trade["strike"], trade["expiry"],
-                            trade["premium"], opt_type, price, position_size)
+        with st.expander("Payoff Chart"):
+            opt_type = "call" if "CALL" in (action or "") else "put"
+            _render_payoff_chart(trade["ticker"], trade["strike"], trade["expiry"],
+                                 trade["premium"], opt_type, price, position_size)
 
-    with st.expander("Risk Reality Check", expanded=False):
-        if trade["risk_check"]:
-            st.markdown(f'<div class="risk-box">{trade["risk_check"]}</div>', unsafe_allow_html=True)
-
-    st.markdown("---")
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
 
 # ── Macro charts ──────────────────────────────────────────────────────────────
 
-def _chart(df, title, color="#5599ff", fill=True, hline=None, zones=None):
+SERIES_LABELS = {
+    "fed_funds_rate": "Fed Funds", "baa_aaa_spread": "Credit Spread",
+    "ted_spread": "TED Spread", "yield_curve_10y2y": "Yield Curve 10Y-2Y",
+    "unemployment_claims": "Jobless Claims", "vix": "VIX",
+}
+
+
+def _chart(df, title, color="#3b82f6", fill=True, hline=None, zones=None):
     if df.empty:
-        st.info(f"No {title} data yet.")
+        st.markdown(f'<div style="color:#374151;font-size:12px;padding:8px 0">No {title} data yet.</div>', unsafe_allow_html=True)
         return
     df = df.sort_values("timestamp")
     fig = go.Figure()
     if zones:
         for y0, y1, c in zones:
             fig.add_hrect(y0=y0, y1=y1, fillcolor=c, line_width=0)
-    fig.add_trace(go.Scatter(x=df["timestamp"], y=df["value"], mode="lines",
-                             line=dict(color=color, width=2), name=title,
-                             fill="tozeroy" if fill else None,
-                             fillcolor=f"rgba{tuple(list(bytes.fromhex(color[1:])) + [0.08])}"))
+    hex_color = color.lstrip('#')
+    r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+    fig.add_trace(go.Scatter(
+        x=df["timestamp"], y=df["value"], mode="lines",
+        line=dict(color=color, width=1.5), name=title,
+        fill="tozeroy" if fill else None,
+        fillcolor=f"rgba({r},{g},{b},0.07)",
+        hovertemplate='%{y:.2f}<extra></extra>',
+    ))
     if hline is not None:
-        fig.add_hline(y=hline, line_dash="dash", line_color="#ff4444", line_width=1)
-    fig.update_layout(title=title, plot_bgcolor="#0a0a0a", paper_bgcolor="#0a0a0a", font_color="#ccc",
-                      height=200, margin=dict(l=10, r=10, t=30, b=10),
-                      xaxis=dict(showgrid=False), yaxis=dict(showgrid=True, gridcolor="#1a1a1a"))
+        fig.add_hline(y=hline, line_dash="dash", line_color="#374151", line_width=1)
+    fig.update_layout(
+        title=dict(text=title, font=dict(color="#64748b", size=11)),
+        plot_bgcolor="#07090f", paper_bgcolor="#07090f", font=dict(color="#64748b", size=10),
+        height=180, margin=dict(l=0, r=0, t=28, b=0),
+        xaxis=dict(showgrid=False, color="#374151", showticklabels=False),
+        yaxis=dict(showgrid=True, gridcolor="#0f1829", color="#374151"),
+        showlegend=False,
+    )
     st.plotly_chart(fig, use_container_width=True, key=f"chart_{title}")
 
 
@@ -320,25 +525,17 @@ def _macro_narrative(macro_rows) -> str:
     for r in macro_rows:
         k, v, z, f = r["series_key"], r["value"], r["z_score_2y"], r["stress_flag"]
         if k == "yield_curve_10y2y" and v is not None:
-            signals.append("Yield curve inverted" if v < 0 else ("Yield curve flattening" if v < 0.3 else None))
-        if k == "baa_aaa_spread" and f:
-            signals.append("Credit spreads widening")
+            if v < 0: signals.append("Yield curve inverted")
+            elif v < 0.3: signals.append("Yield curve flattening")
+        if k == "baa_aaa_spread" and f: signals.append("Credit spreads widening")
         if k == "vix" and v is not None:
-            if v < 15: signals.append("Volatility suppressed")
+            if v < 15: signals.append("Volatility suppressed -- options cheap")
             elif v > 30: signals.append("Fear elevated")
-        if k == "unemployment_claims" and f:
-            signals.append("Jobless claims spiking")
+        if k == "unemployment_claims" and f: signals.append("Jobless claims spiking")
     signals = [s for s in signals if s]
     if not signals:
-        return "Markets calm. No macro stress signals. Options are priced for complacency."
-    return ". ".join(signals[:3]) + ". " + ("Classic pre-stress setup." if len(signals) >= 2 else "Monitor closely.")
-
-
-SERIES_LABELS = {
-    "fed_funds_rate": "Fed Funds Rate", "baa_aaa_spread": "Credit Spread (BAA-10Y)",
-    "ted_spread": "TED Spread", "yield_curve_10y2y": "Yield Curve (10Y-2Y)",
-    "unemployment_claims": "Jobless Claims", "vix": "VIX",
-}
+        return "No macro stress signals. Markets priced for calm. Classic setup for buying cheap tail protection."
+    return ". ".join(signals[:3]) + (". Pre-stress setup." if len(signals) >= 2 else ". Monitor closely.")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -347,103 +544,125 @@ def main():
     conn = get_conn()
     _ensure_tables(conn)
 
-    # Check if we have data -- if not, fetch inline
-    meta = _latest_run(conn)
-    if not meta:
+    # Always call _run_full_cycle (cached 30 min, clears on Refresh click)
+    need_spinner = not _latest_run(conn)
+    if need_spinner:
         with st.spinner("Scanning markets... first load takes 2-3 minutes"):
             _run_full_cycle()
-        meta = _latest_run(conn)
+    else:
+        _run_full_cycle()
 
+    meta = _latest_run(conn)
     run_id = meta.get("run_id")
-
     macro_rows = _load_macro(conn, run_id) if run_id else []
     stress_count = sum(1 for r in macro_rows if r["stress_flag"])
     stress_level = "RED" if stress_count >= 4 else ("YELLOW" if stress_count >= 2 else "GREEN")
-    stress_cls = {"RED": "stress-red", "YELLOW": "stress-yellow", "GREEN": "stress-green"}[stress_level]
-    stress_icon = {"RED": "!!!", "YELLOW": "!!", "GREEN": "OK"}[stress_level]
-    narrative = _macro_narrative(macro_rows) if macro_rows else "No data yet."
+    stress_pill = {"RED": "pill-r", "YELLOW": "pill-y", "GREEN": "pill-g"}[stress_level]
+    stress_icon = {"RED": "RISK", "YELLOW": "CAUTION", "GREEN": "CALM"}[stress_level]
+    narrative = _macro_narrative(macro_rows) if macro_rows else "No macro data loaded yet."
 
-    # ── HEADER ──
-    h1, h2, h3 = st.columns([3, 2, 2])
+    # ── HEADER ──────────────────────────────────────────────────────────────
+    h1, h2, h3, h4 = st.columns([3, 1.5, 2, 1])
     with h1:
-        st.markdown("<h1 style='font-size:26px;letter-spacing:2px;margin-bottom:0'>TALEB TRADE ADVISOR</h1>"
-                    "<p style='color:#999;font-size:11px;margin-top:0'>Convexity | Antifragility | Tail Risk</p>",
-                    unsafe_allow_html=True)
+        st.markdown(
+            "<div style='font-size:28px;font-weight:900;letter-spacing:3px;color:#f1f5f9;line-height:1'>TALEB TRADE ADVISOR</div>"
+            "<div style='font-size:10px;color:#374151;letter-spacing:2px;text-transform:uppercase;margin-top:4px'>Convexity &nbsp;|&nbsp; Antifragility &nbsp;|&nbsp; Tail Risk</div>",
+            unsafe_allow_html=True,
+        )
     with h2:
-        st.markdown(f'<div class="section-hdr">Macro Stress</div><span class="{stress_cls}" style="font-size:20px">'
-                    f'{stress_icon} {stress_level}</span>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div style="font-size:10px;color:#374151;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px">Macro Stress</div>'
+            f'<span class="{stress_pill}">{stress_icon}</span>',
+            unsafe_allow_html=True,
+        )
     with h3:
-        col_ts, col_btn = st.columns([3, 1])
-        with col_ts:
-            st.markdown(f'<div class="section-hdr">Last Updated</div>'
-                        f'<span style="font-size:13px;color:#ddd">{meta.get("finished_at", "Never")[:19]}</span>',
-                        unsafe_allow_html=True)
-        with col_btn:
-            if st.button("Refresh", type="secondary"):
-                _run_full_cycle.clear()
-                st.rerun()
+        assets = meta.get("assets_scanned", 0)
+        opps = meta.get("opportunities", 0)
+        ts = str(meta.get("finished_at", ""))[:16].replace("T", " ")
+        st.markdown(
+            f'<div style="font-size:10px;color:#374151;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:4px">Last Scan</div>'
+            f'<div style="font-size:13px;color:#94a3b8">{ts or "Never"}</div>'
+            f'<div style="font-size:11px;color:#374151;margin-top:2px">{assets} assets &nbsp;|&nbsp; {opps} opportunities</div>',
+            unsafe_allow_html=True,
+        )
+    with h4:
+        st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+        if st.button("Refresh", type="secondary"):
+            _run_full_cycle.clear()
+            st.rerun()
 
-    st.markdown(f'<div style="background:#111;padding:8px 14px;border-radius:6px;font-size:13px;color:#cccccc;margin-bottom:12px">{narrative}</div>',
-                unsafe_allow_html=True)
+    st.markdown(f'<div class="narr">{narrative}</div>', unsafe_allow_html=True)
 
-    # ── POSITION SIZE SLIDER ──
-    position_size = st.slider("Risk per trade ($)", 100, 5000, 500, 50,
-                              help="All P&L tables and payoff charts update dynamically")
-    st.markdown("---")
+    # ── POSITION SIZE ────────────────────────────────────────────────────────
+    position_size = st.slider(
+        "Risk per trade ($)", 100, 5000, 500, 50,
+        help="All P&L tables and payoff charts update dynamically",
+    )
+    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
 
-    # ── LAYOUT ──
-    main_col, side_col = st.columns([2, 1])
+    # ── MAIN LAYOUT ─────────────────────────────────────────────────────────
+    main_col, side_col = st.columns([2, 1], gap="large")
 
     with main_col:
         if not run_id:
-            st.warning("No data available. Click Refresh above.")
+            st.warning("No data available. Click Refresh.")
         else:
             trades = _load_trades(conn, run_id)
             if not trades:
-                st.info("No opportunities scored 50+ in the latest scan. Will rescan in 30 minutes.")
+                st.markdown(
+                    '<div style="background:#090d18;border:1px solid #1a2540;border-radius:10px;padding:20px;color:#64748b;font-size:13px">'
+                    'No opportunities scoring 40+ in the latest scan. Click Refresh to re-scan.</div>',
+                    unsafe_allow_html=True,
+                )
             else:
                 high_t = [t for t in trades if t["conviction_tier"] == "HIGH"]
                 watch_t = [t for t in trades if t["conviction_tier"] == "WATCH"]
+
                 if high_t:
-                    st.markdown('<div style="color:#b8860b;font-weight:700;font-size:15px;margin:8px 0">HIGH CONVICTION TRADES</div>',
-                                unsafe_allow_html=True)
-                    for t in high_t:
-                        _render_trade_card(dict(t), position_size)
+                    st.markdown('<div class="sec-h sec-h-gold">High Conviction Trades</div>', unsafe_allow_html=True)
+                    for idx, t in enumerate(high_t):
+                        _render_trade_card(dict(t), position_size, idx)
+
                 if watch_t:
-                    st.markdown('<div style="color:#5599ff;font-weight:700;font-size:15px;margin:8px 0">WATCH LIST</div>',
-                                unsafe_allow_html=True)
-                    for t in watch_t:
-                        _render_trade_card(dict(t), position_size)
+                    st.markdown('<div class="sec-h sec-h-blue">Watch List</div>', unsafe_allow_html=True)
+                    for idx, t in enumerate(watch_t, start=len(high_t)):
+                        _render_trade_card(dict(t), position_size, idx)
 
     with side_col:
-        st.markdown('<div class="section-hdr">Macro Indicators</div>', unsafe_allow_html=True)
+        # Macro indicators panel
+        st.markdown('<div class="sec-h">Macro Environment</div>', unsafe_allow_html=True)
         if macro_rows:
             for r in macro_rows:
                 key, val, z, flag = r["series_key"], r["value"], r["z_score_2y"], r["stress_flag"]
                 light = "!!!" if flag else ("!" if z and abs(z) > 1.5 else "OK")
+                flag_cls = "mac-r" if flag else ("mac-y" if z and abs(z) > 1.5 else "mac-g")
                 label = SERIES_LABELS.get(key, key)
-                val_str = f"{val/1000:.0f}k" if key == "unemployment_claims" and val else (f"{val:.2f}%" if val is not None else "N/A")
-                z_str = f" (z={z:.1f})" if z is not None else ""
-                color = "#ff4444" if flag else ("#ffbb33" if z and abs(z) > 1.5 else "#00cc66")
-                st.markdown(f'<div style="padding:5px 0;border-bottom:1px solid #1a1a1a">'
-                            f'<span style="color:{color};font-weight:700">{light}</span> <b>{label}</b><br>'
-                            f'<span style="color:#ccc">{val_str}<span style="color:#999;font-size:11px">{z_str}</span></span></div>',
-                            unsafe_allow_html=True)
+                val_str = (f"{val/1000:.0f}k" if key == "unemployment_claims" and val
+                           else (f"{val:.2f}%" if val is not None else "N/A"))
+                z_str = f" z={z:.1f}" if z is not None else ""
+                st.markdown(
+                    f'<div class="mac-row">'
+                    f'<span class="mac-lbl">{label}</span>'
+                    f'<span class="mac-val {flag_cls}">{val_str}<span style="font-size:10px;color:#374151"> {z_str}</span></span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
         else:
-            st.info("No FRED data yet.")
+            st.markdown('<div style="color:#374151;font-size:12px">No FRED data yet.</div>', unsafe_allow_html=True)
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        _chart(_load_history(conn, "yield_curve_10y2y"), "Yield Curve (10Y-2Y)", "#5599ff", hline=0)
-        _chart(_load_history(conn, "vix"), "VIX", "#ffbb33", fill=False,
-               zones=[(0, 15, "rgba(0,200,100,0.06)"), (15, 25, "rgba(255,200,0,0.04)"), (25, 100, "rgba(255,50,50,0.04)")])
+        st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+        _chart(_load_history(conn, "yield_curve_10y2y"), "Yield Curve (10Y-2Y)", "#3b82f6", hline=0)
+        _chart(_load_history(conn, "vix"), "VIX", "#f59e0b", fill=False,
+               zones=[(0, 15, "rgba(16,185,129,0.06)"), (15, 25, "rgba(245,158,11,0.04)"), (25, 100, "rgba(239,68,68,0.04)")])
 
-    # ── PORTFOLIO SIMULATOR ──
+    # ── PORTFOLIO SIMULATOR ──────────────────────────────────────────────────
     if run_id:
         trades = _load_trades(conn, run_id)
         if trades and len(trades) > 1:
             st.markdown("---")
-            st.markdown('<div class="section-hdr">Portfolio Simulator</div>', unsafe_allow_html=True)
-            total_cost, total_base = 0, 0
+            st.markdown('<div class="sec-h">Portfolio Simulator</div>', unsafe_allow_html=True)
+            total_cost = 0
+            total_base = 0
             tickers = []
             for t in trades:
                 t = dict(t)
@@ -455,23 +674,24 @@ def main():
                 total_cost += c
                 try:
                     scens = json.loads(t["pnl_scenarios"]) if t["pnl_scenarios"] else []
-                    base = next((s for s in scens if s["scenario"] == "Base Case"), None)
+                    base = next((s for s in scens if s.get("scenario") == "Base Case"), None)
                     if base:
-                        total_base += base["pnl"]
+                        total_base += base.get("pnl", 0)
                 except Exception:
                     pass
                 tickers.append(t["ticker"])
 
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Combined Cost", f"${total_cost:,.0f}")
-            c2.metric("Max Loss", f"-${total_cost:,.0f}")
-            c3.metric("Base Case P&L", f"${total_base:+,.0f}")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Trades", str(len(trades)))
+            c2.metric("Combined Cost", f"${total_cost:,.0f}")
+            c3.metric("Max Loss", f"-${total_cost:,.0f}")
+            c4.metric("Base Case P&L", f"${total_base:+,.0f}")
             if len(set(tickers)) < len(tickers):
-                st.warning("Correlated trades detected.")
+                st.warning("Duplicate tickers detected -- correlated exposure.")
 
-    # ── ACTIVITY LOG ──
+    # ── ACTIVITY LOG ─────────────────────────────────────────────────────────
     st.markdown("---")
-    st.markdown('<div class="section-hdr">Agent Activity Log</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-h">Agent Activity Log</div>', unsafe_allow_html=True)
     log_rows = _load_log(conn)
     if log_rows:
         for r in log_rows:
@@ -481,29 +701,23 @@ def main():
             if r["errors"] and r["errors"] != "null":
                 try:
                     e = json.loads(r["errors"])
-                    if e: errs = f" | {', '.join(str(x)[:30] for x in e[:2])}"
+                    if e:
+                        errs = f" | {', '.join(str(x)[:30] for x in e[:2])}"
                 except Exception:
                     pass
-            st.markdown(f'<div class="log-row">[{icon}] <b>{r["run_id"]}</b> '
-                        f'{str(r["started_at"])[:19]} assets={r["assets_scanned"]} opps={r["opportunities"]}{errs}</div>',
-                        unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="log-r">[{icon}] <b style="color:#64748b">{r["run_id"]}</b>'
+                f' {str(r["started_at"])[:19]}'
+                f' assets={r["assets_scanned"]} opps={r["opportunities"]}{errs}</div>',
+                unsafe_allow_html=True,
+            )
     else:
-        st.info("No runs yet.")
+        st.markdown('<div style="color:#374151;font-size:12px">No runs yet.</div>', unsafe_allow_html=True)
 
-    # ── Auto-refresh ──
-    if "t0" not in st.session_state:
-        st.session_state.t0 = time.time()
-    elapsed = int(time.time() - st.session_state.t0)
-    remaining = max(0, REFRESH_SEC - elapsed)
-    st.markdown(f'<div style="text-align:center;color:#777;font-size:10px;margin-top:20px">Refresh in {remaining}s</div>',
-                unsafe_allow_html=True)
-    if remaining <= 0:
-        st.session_state.t0 = time.time()
-        _run_full_cycle.clear()
-        st.rerun()
-    else:
-        time.sleep(1)
-        st.rerun()
+    st.markdown(
+        '<div style="text-align:center;color:#1e2a3a;font-size:10px;margin-top:24px;letter-spacing:1px">DATA REFRESHES EVERY 30 MINUTES &nbsp;|&nbsp; CLICK REFRESH TO FORCE UPDATE</div>',
+        unsafe_allow_html=True,
+    )
 
 
 if __name__ == "__main__":
