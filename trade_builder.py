@@ -152,7 +152,7 @@ def _decide_direction(ticker: str, snap_data: dict, macro_data: dict) -> str:
     tk = ticker.upper()
 
     # VIX products: always calls (betting on vol spike)
-    if tk in ("VIXY", "UVXY"):
+    if tk in ("VIXY", "UVXY", "VIXM"):
         return "call"
 
     # Inverse VIX: always puts (betting on vol spike)
@@ -166,6 +166,22 @@ def _decide_direction(ticker: str, snap_data: dict, macro_data: dict) -> str:
     if tk in ("SPY", "QQQ", "IWM") and stress in ("YELLOW", "RED"):
         return "put"
 
+    # Bonds: calls during stress (flight to quality), puts near highs
+    if tk in ("TLT", "TIP"):
+        if stress in ("YELLOW", "RED"):
+            return "call"
+        if w52 is not None and w52 >= 0.80:
+            return "put"
+        return "call"
+
+    # Uranium / Nuclear: always calls (structural bullish optionality)
+    if tk in ("URA", "URNM"):
+        return "call"
+
+    # Strategic materials: calls (supply chain disruption upside)
+    if tk in ("REMX", "LIT"):
+        return "call"
+
     # Near 52w low: calls (mean reversion / recovery)
     if w52 is not None and w52 <= 0.25:
         return "call"
@@ -174,8 +190,9 @@ def _decide_direction(ticker: str, snap_data: dict, macro_data: dict) -> str:
     if w52 is not None and w52 >= 0.80:
         return "put"
 
-    # Commodities in stress: calls
-    if tk in ("GLD", "SLV", "CPER", "USO", "UNG") and stress != "GREEN":
+    # Commodities / Agriculture in stress: calls
+    if tk in ("GLD", "SLV", "CPER", "USO", "UNG", "PALL", "PPLT",
+              "WEAT", "CORN", "DBA", "SLX") and stress != "GREEN":
         return "call"
 
     # Default: calls (asymmetric upside)

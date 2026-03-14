@@ -28,20 +28,36 @@ NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
 # ── Asset Universe ────────────────────────────────────────────────────────────
 
 EQUITY_UNIVERSE = [
-    # Broad market
-    "SPY", "QQQ", "IWM", "VTI", "EFA", "EEM",
-    # Volatility
-    "VIXY", "UVXY", "SVXY",
-    # Commodities
-    "GLD", "SLV", "USO", "UNG", "CPER", "PDBC",
+    # Broad market (benchmark + small cap optionality)
+    "SPY", "QQQ", "IWM", "VTI", "EFA", "EEM", "IWN",
+    # Volatility surface
+    "VIXY", "UVXY", "SVXY", "VIXM",
+    # Precious metals
+    "GLD", "SLV", "PALL", "PPLT",
+    # Energy commodities
+    "USO", "UNG",
+    # Industrial / base commodities
+    "CPER", "PDBC",
+    # Agriculture (real assets, geo-sensitive, neglected)
+    "WEAT", "CORN", "DBA", "MOO",
+    # Uranium / Nuclear (neglected sector, massive optionality)
+    "URA", "URNM",
+    # Strategic materials (rare earth, lithium -- supply chain fragility)
+    "REMX", "LIT",
+    # Bonds / Rates (barbell: flight-to-quality + rate shock plays)
+    "TLT", "TIP",
     # Defense / Cyber
     "ITA", "XAR", "HACK",
-    # International
-    "EIDO", "EWZ", "EWY", "EWT", "EWU", "EWG", "EWJ",
+    # Emerging / Frontier markets (political optionality)
+    "EIDO", "EWZ", "EWY", "EWT", "TUR", "EZA", "ARGT",
+    # Developed international
+    "EWU", "EWG", "EWJ",
     # Sector
     "XLE", "XLF", "XLU", "XLV", "XBI",
-    # Hard assets
-    "DJP", "GUNR", "MOO",
+    # Real assets / Infrastructure
+    "DJP", "GUNR", "IFRA", "WOOD",
+    # Steel (cyclical, real-world trade indicator)
+    "SLX",
 ]
 
 FRED_SERIES = {
@@ -56,7 +72,7 @@ FRED_SERIES = {
 NEWS_KEYWORDS = [
     "geopolitical risk", "supply chain", "sanctions", "conflict",
     "central bank", "systemic risk", "black swan", "tail risk",
-    "regime change",
+    "regime change", "debt crisis", "currency crisis", "commodity shortage",
 ]
 
 MAJOR_OUTLETS = {

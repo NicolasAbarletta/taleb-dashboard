@@ -338,7 +338,7 @@ def _render_payoff_chart(ticker, strike, expiry, premium, opt_type, price, posit
         yaxis=dict(showgrid=True, gridcolor="#0f1829", color="#64748b"),
         legend=dict(font=dict(color="#64748b")),
     )
-    st.plotly_chart(fig, use_container_width=True, key=f"payoff_{ticker}")
+    st.plotly_chart(fig, width="stretch", key=f"payoff_{ticker}")
 
 
 # ── Render: Trade card ────────────────────────────────────────────────────────
@@ -480,7 +480,7 @@ def _render_trade_card(trade, position_size, idx=0):
                     {"Scenario": "Base Case", "Trigger": f"${bt:.2f}", "P&L": f"${bp:+,.0f}", "Return": f"{bp/cost*100:+.0f}%" if cost > 0 else "0%"},
                     {"Scenario": "Home Run", "Trigger": f"${ht:.2f}", "P&L": f"${hp:+,.0f}", "Return": f"{hp/cost*100:+.0f}%" if cost > 0 else "0%"},
                 ]
-                st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+                st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
             elif scenarios:
                 st.markdown('<span style="color:#374151">No options data for scenario modeling.</span>', unsafe_allow_html=True)
             else:
@@ -541,7 +541,7 @@ def _chart(df, title, color="#3b82f6", fill=True, hline=None, zones=None):
         yaxis=dict(showgrid=True, gridcolor="#0f1829", color="#374151"),
         showlegend=False,
     )
-    st.plotly_chart(fig, use_container_width=True, key=f"chart_{title}")
+    st.plotly_chart(fig, width="stretch", key=f"chart_{title}")
 
 
 def _macro_narrative(macro_rows) -> str:

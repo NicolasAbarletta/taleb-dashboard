@@ -134,7 +134,7 @@ def _score_antifragility(s: Snap, m: Macro) -> tuple[int, dict]:
     sc, d = 10, {}
     tk = s.ticker.upper()
 
-    if tk in ("VIXY", "UVXY"):
+    if tk in ("VIXY", "UVXY", "VIXM"):
         if m.vix_value is not None and m.vix_value < 18:
             sc += 12; d["vix_cheap"] = f"+12 (VIX={m.vix_value:.1f} cheap fear insurance)"
         elif m.vix_value is not None and m.vix_value < 22:
@@ -146,11 +146,42 @@ def _score_antifragility(s: Snap, m: Macro) -> tuple[int, dict]:
         g = round(m.geo_news_score * 15)
         sc += g; d["defense"] = f"+{g} (geo={m.geo_news_score:.2f})"
 
-    if tk in ("GLD", "SLV", "CPER", "USO", "UNG", "PDBC", "GUNR"):
+    if tk in ("GLD", "SLV", "CPER", "USO", "UNG", "PDBC", "GUNR",
+              "PALL", "PPLT", "SLX"):
         if m.stress_level in ("YELLOW", "RED"):
             sc += 8; d["commodity"] = f"+8 (stress={m.stress_level})"
         elif m.geo_news_score > 0.4:
             sc += 5; d["commodity"] = "+5 (geo elevated)"
+
+    # Agriculture: benefits from supply chain disruption and geo conflict
+    if tk in ("WEAT", "CORN", "DBA", "MOO"):
+        if m.geo_news_score > 0.4:
+            sc += 8; d["agri"] = f"+8 (food supply geo risk={m.geo_news_score:.2f})"
+        elif m.stress_level in ("YELLOW", "RED"):
+            sc += 5; d["agri"] = f"+5 (stress={m.stress_level})"
+
+    # Uranium/Nuclear: neglected sector with massive optionality
+    if tk in ("URA", "URNM"):
+        sc += 6; d["nuclear"] = "+6 (neglected sector, structural demand)"
+        if m.geo_news_score > 0.5:
+            sc += 3; d["nuclear_geo"] = "+3 (energy security catalyst)"
+
+    # Strategic materials: supply chain fragility = optionality
+    if tk in ("REMX", "LIT"):
+        sc += 5; d["strategic"] = "+5 (critical supply chain optionality)"
+        if m.geo_news_score > 0.4:
+            sc += 3; d["strategic_geo"] = "+3 (supply chain disruption risk)"
+
+    # Bonds: flight-to-quality during stress (antifragile in crises)
+    if tk in ("TLT", "TIP"):
+        if m.stress_level in ("YELLOW", "RED"):
+            sc += 8; d["bonds"] = f"+8 (flight to quality, stress={m.stress_level})"
+        elif m.yield_curve is not None and m.yield_curve < 0:
+            sc += 5; d["bonds"] = "+5 (inverted yield curve)"
+
+    # Real assets / Infrastructure: tangible, inflation-resistant
+    if tk in ("IFRA", "WOOD"):
+        sc += 3; d["real_asset"] = "+3 (tangible real asset)"
 
     if s.beta is not None:
         if s.beta > 1.3:
@@ -162,7 +193,7 @@ def _score_antifragility(s: Snap, m: Macro) -> tuple[int, dict]:
         elif s.beta < 0:
             sc += 8; d["beta"] = f"+8 (beta={s.beta:.2f})"
 
-    if tk in ("EIDO", "EWZ", "EWY", "EWT") and m.geo_news_score > 0.5:
+    if tk in ("EIDO", "EWZ", "EWY", "EWT", "TUR", "EZA", "ARGT") and m.geo_news_score > 0.5:
         sc += 4; d["frontier"] = "+4 (geo catalyst)"
 
     return max(0, min(25, sc)), d
@@ -184,11 +215,15 @@ def _score_fragility(s: Snap, m: Macro) -> tuple[int, dict]:
 
     if tk in ("SPY", "QQQ", "VTI", "EFA"):
         sc -= 8; d["consensus"] = "-8 (consensus ETF)"
-    elif tk in ("GLD", "IWM"):
+    elif tk in ("GLD", "IWM", "TLT"):
         sc -= 3; d["popular"] = "-3 (well-covered)"
 
-    if tk in ("CPER", "DJP", "GUNR", "MOO"):
+    if tk in ("CPER", "DJP", "GUNR", "MOO", "WEAT", "CORN", "DBA",
+              "URA", "URNM", "REMX", "LIT", "PALL", "PPLT",
+              "IFRA", "WOOD", "SLX", "FM", "ARGT"):
         sc += 7; d["uncrowded"] = "+7 (low coverage)"
+    elif tk in ("TUR", "EZA", "EIDO"):
+        sc += 5; d["uncrowded"] = "+5 (under-followed EM)"
 
     if s.volume_ratio is not None:
         if s.volume_ratio > 3.0:
@@ -236,18 +271,29 @@ def _score_tail_risk(s: Snap) -> tuple[int, dict]:
 
 def _catalyst(s: Snap, m: Macro) -> str:
     parts = []
+    tk = s.ticker.upper()
     if s.week52_position is not None and s.week52_position <= 0.20:
         parts.append("Near 52w low")
     if s.iv_1y_percentile is not None and s.iv_1y_percentile <= 20:
         parts.append(f"IV {s.iv_1y_percentile:.0f}th pct")
     elif s.iv_30d is not None and s.iv_30d < 0.20:
         parts.append(f"Low IV ({s.iv_30d:.2f})")
-    if s.ticker in ("VIXY", "UVXY") and m.vix_value and m.vix_value < 18:
+    if tk in ("VIXY", "UVXY", "VIXM") and m.vix_value and m.vix_value < 18:
         parts.append(f"VIX={m.vix_value:.1f}")
-    if s.ticker in ("ITA", "XAR", "HACK") and m.geo_news_score > 0.4:
+    if tk in ("ITA", "XAR", "HACK") and m.geo_news_score > 0.4:
         parts.append("Geo risk elevated")
-    if m.stress_level in ("YELLOW", "RED") and s.ticker in ("GLD", "SLV", "CPER"):
+    if m.stress_level in ("YELLOW", "RED") and tk in ("GLD", "SLV", "CPER", "PALL", "PPLT"):
         parts.append(f"Macro stress {m.stress_level}")
+    if tk in ("URA", "URNM"):
+        parts.append("Nuclear optionality")
+    if tk in ("REMX", "LIT"):
+        parts.append("Supply chain fragility")
+    if tk in ("WEAT", "CORN", "DBA") and m.geo_news_score > 0.3:
+        parts.append("Food supply risk")
+    if tk in ("TLT", "TIP") and m.stress_level in ("YELLOW", "RED"):
+        parts.append("Flight to quality")
+    if tk in ("TUR", "EZA", "ARGT", "FM") and m.geo_news_score > 0.4:
+        parts.append("Frontier geo catalyst")
     return " | ".join(parts[:2]) if parts else "Technical setup"
 
 
