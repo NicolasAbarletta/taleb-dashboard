@@ -17,13 +17,20 @@ _local = threading.local()
 
 def get_conn(db_path: str = DB_PATH) -> sqlite3.Connection:
     """Thread-local connection with WAL mode for concurrent read/write."""
-    if not hasattr(_local, "conn") or _local.conn is None:
+    conn = getattr(_local, "conn", None)
+    # Validate existing connection is still usable
+    if conn is not None:
+        try:
+            conn.execute("SELECT 1")
+        except Exception:
+            conn = None
+    if conn is None:
         conn = sqlite3.connect(db_path, check_same_thread=False)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=5000")
         conn.row_factory = sqlite3.Row
         _local.conn = conn
-    return _local.conn
+    return conn
 
 
 def init_db(db_path: str = DB_PATH) -> sqlite3.Connection:
@@ -51,9 +58,29 @@ def init_db(db_path: str = DB_PATH) -> sqlite3.Connection:
             iv_1y_percentile REAL,
             short_interest  REAL,
             market_cap      REAL,
-            beta            REAL
+            beta            REAL,
+            realized_vol_20d    REAL,
+            return_20d          REAL,
+            return_60d          REAL,
+            skewness_60d        REAL,
+            spy_correlation_60d REAL,
+            volume_trend_20d    REAL,
+            drawdown_from_peak  REAL
         )
     """)
+
+    # Graceful migration for existing DBs -- add columns if missing
+    _new_cols = [
+        "realized_vol_20d", "return_20d", "return_60d", "skewness_60d",
+        "spy_correlation_60d", "volume_trend_20d", "drawdown_from_peak",
+    ]
+    try:
+        existing = {row[1] for row in cur.execute("PRAGMA table_info(equity_snapshots)").fetchall()}
+        for col in _new_cols:
+            if col not in existing:
+                cur.execute(f"ALTER TABLE equity_snapshots ADD COLUMN {col} REAL")
+    except Exception:
+        pass
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS macro_snapshots (

@@ -297,9 +297,9 @@ def _catalyst(s: Snap, m: Macro) -> str:
     return " | ".join(parts[:2]) if parts else "Technical setup"
 
 
-# ── Claude rationale ──────────────────────────────────────────────────────────
+# ── Claude rationale (intelligence-enhanced) ─────────────────────────────────
 
-def _rationale(sc: Score, m: Macro) -> str:
+def _rationale(sc: Score, m: Macro, intelligence_brief: str = "") -> str:
     if not ANTHROPIC_API_KEY:
         return (
             f"{sc.ticker} scores {sc.total}/100. Catalyst: {sc.catalyst}. "
@@ -310,11 +310,26 @@ def _rationale(sc: Score, m: Macro) -> str:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         msg = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=250,
-            messages=[{"role": "user", "content": f"""Write a 3-sentence trade thesis for {sc.ticker} like a senior trader explaining to a smart friend.
-No jargon. Be specific about WHY now and what could go wrong.
-Context: Score {sc.total}/100, Catalyst: {sc.catalyst}, VIX: {m.vix_value}, Macro: {m.stress_level}, Yield curve: {m.yield_curve}.
-Tone: blunt, direct, skeptical of consensus. Not a memo -- a conversation."""}],
+            max_tokens=400,
+            messages=[{"role": "user", "content": f"""You are Nassim Taleb advising a smart friend on whether {sc.ticker} is worth watching.
+
+INTELLIGENCE BRIEF:
+{intelligence_brief}
+
+SCORING: {sc.ticker} scored {sc.total}/100
+- Asymmetry (cheap bets): {sc.convexity}/30
+- Strength (benefits from chaos): {sc.antifragility}/25
+- Avoids Crowds: {sc.fragility_avoidance}/25
+- Black Swan Upside: {sc.tail_risk}/20
+Catalyst: {sc.catalyst}
+
+Write a 3-sentence rationale. Be SPECIFIC:
+- Reference the historical analog data if available (quote the numbers)
+- Explain what the CROWD is missing, not what is obvious
+- Name the specific scenario that makes this pay off big
+- If it is actually a bad trade, say so bluntly
+
+Tone: Taleb at dinner -- intellectual, contrarian, uses data. Not a Bloomberg terminal summary."""}],
         )
         return msg.content[0].text.strip()
     except Exception as e:
@@ -326,6 +341,9 @@ Tone: blunt, direct, skeptical of consensus. Not a memo -- a conversation."""}],
 
 def score_all(conn, run_id: str | None = None) -> list[Score]:
     from database import latest_run_id
+    import market_context as mc
+    from agent import _hist_cache
+
     if run_id is None:
         run_id = latest_run_id(conn)
     if not run_id:
@@ -336,6 +354,14 @@ def score_all(conn, run_id: str | None = None) -> list[Score]:
     snaps = _load_snaps(conn, run_id)
     macro = _load_macro(conn, run_id)
     log.info(f"[scorer] {len(snaps)} assets | stress={macro.stress_level} | geo={macro.geo_news_score:.2f}")
+
+    # ── Intelligence layer: compute once per run ──
+    macro_dict = mc.load_macro_dict(conn, run_id)
+    regime = mc.detect_regime(macro_dict)
+    all_snap_dicts = mc.load_snap_dicts(conn, run_id)
+    cross_signals = mc.compute_cross_asset_signals(all_snap_dicts, regime)
+    snap_dict_by_ticker = {s["ticker"]: s for s in all_snap_dicts}
+    log.info(f"[scorer] Regime: {regime.overall_regime} | VIX: {regime.vix_regime}")
 
     results = []
     opps = 0
@@ -358,7 +384,16 @@ def score_all(conn, run_id: str | None = None) -> list[Score]:
         )
 
         if tier in ("WATCH", "HIGH"):
-            sc.rationale = _rationale(sc, macro)
+            # Build intelligence brief for this ticker
+            hist_df = _hist_cache.get(s.ticker)
+            analog = mc.compute_historical_analog(
+                s.ticker, hist_df, s.week52_position, s.iv_30d
+            )
+            snap_d = snap_dict_by_ticker.get(s.ticker, {})
+            brief = mc.build_intelligence_brief(
+                s.ticker, snap_d, regime, analog, cross_signals
+            )
+            sc.rationale = _rationale(sc, macro, intelligence_brief=brief)
             opps += 1
 
         conn.execute("""

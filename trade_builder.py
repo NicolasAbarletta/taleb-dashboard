@@ -287,7 +287,7 @@ def build_payoff_curve(opt: OptionLeg | None, price: float, position_size: float
 
 # ── Claude-powered thesis & triggers ─────────────────────────────────────────
 
-def _generate_thesis_and_triggers(rec: TradeRec, macro: dict) -> tuple[str, list[str], str]:
+def _generate_thesis_and_triggers(rec: TradeRec, macro: dict, intelligence_brief: str = "") -> tuple[str, list[str], str]:
     """
     Generate trader-voice thesis, trigger checklist, and risk reality check.
     Returns (thesis, triggers, risk_check).
@@ -299,22 +299,25 @@ def _generate_thesis_and_triggers(rec: TradeRec, macro: dict) -> tuple[str, list
 Option: {opt.option_type.upper()} {rec.ticker} ${opt.strike} exp {opt.expiry}
 Premium: ${opt.premium}/contract, Delta: {opt.delta}, DTE: {opt.dte}"""
 
-    prompt = f"""You are a senior options trader giving a friend specific trade advice.
-Generate THREE things for this trade (output them as JSON, nothing else):
+    prompt = f"""You are a senior options trader who thinks like Nassim Taleb.
+Generate THREE things for this trade (output as JSON, nothing else):
 
-Trade: {rec.action} {rec.ticker} at ${rec.underlying_price:.2f}
+TRADE: {rec.action} {rec.ticker} at ${rec.underlying_price:.2f}
 {opt_details}
-Score: {rec.total_score}/100 ({rec.conviction_tier})
+
+INTELLIGENCE BRIEF:
+{intelligence_brief}
+
+SCORING: {rec.total_score}/100 ({rec.conviction_tier})
 Catalyst: {rec.catalyst}
-Macro stress: {macro.get('stress_level', 'GREEN')}
-VIX: {macro.get('vix_value', 'N/A')}
-Yield curve: {macro.get('yield_curve', 'N/A')}
 
 Return valid JSON with exactly these keys:
 {{
-  "thesis": "3 sentences max. Like explaining to a smart friend at a bar. Specific. Why NOW. What the market is missing. What could go wrong. No jargon. Examples: 'Oil is being ignored right now. If Iran escalates, this triples. If not, you lose what you paid for lunch.'",
-  "triggers": ["3-5 specific, measurable conditions that must happen for this trade to work. Be precise with numbers and timeframes. Like: 'VIX closes above 25 within 30 days' or 'Gold breaks $2100 resistance'"],
-  "risk_check": "1-2 sentences. Blunt reality check. How often does this type of trade work? Size it like what? Be honest."
+  "thesis": "3-4 sentences. Reference the historical analog data if available -- quote the actual numbers (win rate, average return, number of similar setups). Explain what the market is WRONG about, not what it is right about. Be specific about the catalyst and timeline. Compare to a similar historical moment if the data supports it. Quality example: 'Uranium miners are 34 percent off their peak while nuclear capacity is expanding for the first time in 20 years. The last time URA was at this level with similar IV, it rallied 22 percent in 2 months. The crowd is chasing AI stocks and completely ignoring the energy transition underneath. You risk $200 to potentially make $1000.'",
+
+  "triggers": ["4-5 SPECIFIC, MEASURABLE conditions with exact numbers and timeframes. Reference cross-asset signals where relevant. Quality examples: 'URA breaks above $54 (20-day moving average) on above-average volume', 'VIX stays below 20 for 2+ weeks confirming complacency = cheap options', 'Gold/copper ratio declines below 500 signaling risk appetite improving', 'No new nuclear regulatory setbacks within 30 days'"],
+
+  "risk_check": "2-3 sentences. Be brutally honest. If the historical analog data shows a win rate, quote it. What is the base rate for this type of trade? What is the most likely way you LOSE money? Give a specific sizing recommendation (e.g. 'Size this like a dinner -- $200-500 max. You will probably lose it. But 1 in 3 times, you make 5x.')."
 }}"""
 
     if not ANTHROPIC_API_KEY:
@@ -334,7 +337,7 @@ Return valid JSON with exactly these keys:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         msg = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=500,
+            max_tokens=700,
             messages=[{"role": "user", "content": prompt}],
         )
         text = msg.content[0].text.strip()
@@ -362,8 +365,12 @@ Return valid JSON with exactly these keys:
 
 def build_trades(conn, run_id: str, position_size: float = 500.0) -> list[TradeRec]:
     """
-    Build complete trade recommendations for all scored opportunities (50+).
+    Build complete trade recommendations for all scored opportunities (40+).
+    Now enhanced with intelligence layer for better Claude prompts.
     """
+    import market_context as mc
+    from agent import _hist_cache
+
     log.info(f"[trades] Building recommendations for {run_id}")
 
     # Load scored opportunities
@@ -379,7 +386,7 @@ def build_trades(conn, run_id: str, position_size: float = 500.0) -> list[TradeR
     """, (run_id,)).fetchall()
 
     if not rows:
-        log.info("[trades] No opportunities >= 50")
+        log.info("[trades] No opportunities >= 40")
         return []
 
     # Load macro context
@@ -396,6 +403,14 @@ def build_trades(conn, run_id: str, position_size: float = 500.0) -> list[TradeR
         if r["series_key"] == "yield_curve_10y2y":
             macro["yield_curve"] = r["value"]
     macro["stress_level"] = "RED" if stress_count >= 4 else ("YELLOW" if stress_count >= 2 else "GREEN")
+
+    # ── Intelligence layer: compute once per run ──
+    macro_dict = mc.load_macro_dict(conn, run_id)
+    regime = mc.detect_regime(macro_dict)
+    all_snap_dicts = mc.load_snap_dicts(conn, run_id)
+    cross_signals = mc.compute_cross_asset_signals(all_snap_dicts, regime)
+    snap_dict_by_ticker = {s["ticker"]: s for s in all_snap_dicts}
+    log.info(f"[trades] Intelligence: regime={regime.overall_regime}, cross-signals computed")
 
     results = []
 
@@ -441,8 +456,20 @@ def build_trades(conn, run_id: str, position_size: float = 500.0) -> list[TradeR
         # Generate P&L scenarios
         rec.pnl_scenarios = _build_pnl_scenarios(opt, price, position_size)
 
-        # Generate thesis, triggers, risk check via Claude
-        rec.thesis, rec.triggers, rec.risk_check = _generate_thesis_and_triggers(rec, macro)
+        # Build intelligence brief for this trade
+        hist_df = _hist_cache.get(ticker)
+        analog = mc.compute_historical_analog(
+            ticker, hist_df, row["week52_position"], row["iv_30d"]
+        )
+        snap_d = snap_dict_by_ticker.get(ticker, {})
+        brief = mc.build_intelligence_brief(
+            ticker, snap_d, regime, analog, cross_signals
+        )
+
+        # Generate thesis, triggers, risk check via Claude (with intelligence)
+        rec.thesis, rec.triggers, rec.risk_check = _generate_thesis_and_triggers(
+            rec, macro, intelligence_brief=brief
+        )
 
         # Persist to DB
         conn.execute("""

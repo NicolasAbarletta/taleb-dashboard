@@ -25,6 +25,9 @@ log = logging.getLogger("agent")
 FRED_API_KEY = os.getenv("FRED_API_KEY", "")
 NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
 
+# Module-level cache: ticker -> 1yr history DataFrame (used by market_context)
+_hist_cache: dict[str, pd.DataFrame] = {}
+
 # ── Asset Universe ────────────────────────────────────────────────────────────
 
 EQUITY_UNIVERSE = [
@@ -160,8 +163,87 @@ def _iv_percentile(ticker: str, current_iv: float | None, conn) -> float | None:
         return None
 
 
+def _compute_derived_metrics(hist: pd.DataFrame, spy_returns: pd.Series | None) -> dict:
+    """Compute intelligence-layer derived metrics from 1yr price history."""
+    m = {
+        "realized_vol_20d": None, "return_20d": None, "return_60d": None,
+        "skewness_60d": None, "spy_correlation_60d": None,
+        "volume_trend_20d": None, "drawdown_from_peak": None,
+    }
+    try:
+        closes = hist["Close"].dropna()
+        if len(closes) < 21:
+            return m
+
+        # Log returns for volatility and skewness
+        log_ret = np.log(closes / closes.shift(1)).dropna()
+
+        # Realized vol: annualized 20-day
+        if len(log_ret) >= 20:
+            m["realized_vol_20d"] = round(float(log_ret.iloc[-20:].std() * np.sqrt(252)), 4)
+
+        # Trailing returns
+        if len(closes) >= 21:
+            m["return_20d"] = round(float((closes.iloc[-1] / closes.iloc[-21] - 1) * 100), 2)
+        if len(closes) >= 61:
+            m["return_60d"] = round(float((closes.iloc[-1] / closes.iloc[-61] - 1) * 100), 2)
+
+        # Skewness of 60-day returns (positive = convex payoff profile)
+        if len(log_ret) >= 60:
+            tail = log_ret.iloc[-60:]
+            n = len(tail)
+            mu = tail.mean()
+            std = tail.std()
+            if std > 0:
+                m["skewness_60d"] = round(float(((tail - mu) ** 3).mean() / (std ** 3)), 3)
+
+        # SPY correlation (60-day trailing)
+        if spy_returns is not None and len(log_ret) >= 60:
+            asset_tail = log_ret.iloc[-60:]
+            # Align by date index
+            common = asset_tail.index.intersection(spy_returns.index)
+            if len(common) >= 30:
+                corr = asset_tail.loc[common].corr(spy_returns.loc[common])
+                m["spy_correlation_60d"] = round(float(corr), 3) if not np.isnan(corr) else None
+
+        # Volume trend: linear regression slope of last 20 days (normalized)
+        if "Volume" in hist.columns and len(hist) >= 20:
+            vol_tail = hist["Volume"].iloc[-20:].dropna()
+            if len(vol_tail) >= 15:
+                x = np.arange(len(vol_tail))
+                mean_vol = vol_tail.mean()
+                if mean_vol > 0:
+                    slope = np.polyfit(x, vol_tail.values, 1)[0]
+                    m["volume_trend_20d"] = round(float(slope / mean_vol), 4)
+
+        # Drawdown from 52w peak
+        peak = closes.max()
+        current = closes.iloc[-1]
+        if peak > 0:
+            m["drawdown_from_peak"] = round(float((current - peak) / peak * 100), 2)
+
+    except Exception as e:
+        log.debug(f"[derived] error: {e}")
+
+    return m
+
+
 def fetch_equity_data(conn, run_id: str) -> int:
+    global _hist_cache
+    _hist_cache.clear()
+
     log.info(f"[yfinance] Fetching {len(EQUITY_UNIVERSE)} tickers")
+
+    # Pre-fetch SPY returns for correlation computation
+    spy_returns = None
+    try:
+        spy_hist = yf.Ticker("SPY").history(period="1y", auto_adjust=True)
+        if not spy_hist.empty:
+            spy_returns = np.log(spy_hist["Close"] / spy_hist["Close"].shift(1)).dropna()
+            _hist_cache["SPY_BENCH"] = spy_hist
+    except Exception as e:
+        log.warning(f"[yfinance] SPY benchmark fetch failed: {e}")
+
     count = 0
     for sym in EQUITY_UNIVERSE:
         try:
@@ -176,6 +258,9 @@ def fetch_equity_data(conn, run_id: str) -> int:
             if price is None:
                 continue
 
+            # Cache history for market_context.py
+            _hist_cache[sym] = hist
+
             price_1d = _safe_float(hist["Close"].iloc[-2]) if len(hist) > 1 else None
             change_1d = round((price - price_1d) / price_1d * 100, 2) if price_1d else None
             vol = _safe_float(hist["Volume"].iloc[-1])
@@ -188,14 +273,20 @@ def fetch_equity_data(conn, run_id: str) -> int:
             iv = _fetch_iv_from_options(t, price)
             iv_pct = _iv_percentile(sym, iv.get("iv_30d"), conn)
 
+            # Compute intelligence-layer derived metrics
+            derived = _compute_derived_metrics(hist, spy_returns)
+
             conn.execute("""
                 INSERT INTO equity_snapshots (
                     run_id, timestamp, ticker, price, price_change_1d,
                     volume, avg_volume_20d, volume_ratio,
                     week52_high, week52_low, week52_position,
                     iv_30d, iv_60d, iv_90d, iv_1y_percentile,
-                    short_interest, market_cap, beta
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    short_interest, market_cap, beta,
+                    realized_vol_20d, return_20d, return_60d,
+                    skewness_60d, spy_correlation_60d,
+                    volume_trend_20d, drawdown_from_peak
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 run_id, _now_utc(), sym, price, change_1d,
                 vol, avg_vol, vol_ratio,
@@ -204,6 +295,9 @@ def fetch_equity_data(conn, run_id: str) -> int:
                 _safe_float(info.get("shortPercentOfFloat")),
                 _safe_float(info.get("marketCap")),
                 _safe_float(info.get("beta")),
+                derived["realized_vol_20d"], derived["return_20d"], derived["return_60d"],
+                derived["skewness_60d"], derived["spy_correlation_60d"],
+                derived["volume_trend_20d"], derived["drawdown_from_peak"],
             ))
             conn.commit()
             count += 1

@@ -571,10 +571,13 @@ def main():
     # Always call _run_full_cycle (cached 30 min, clears on Refresh click)
     need_spinner = not _latest_run(conn)
     if need_spinner:
-        with st.spinner("Scanning markets... first load takes 2-3 minutes"):
+        with st.spinner("Scanning markets... first load takes 3-5 minutes"):
             _run_full_cycle()
     else:
         _run_full_cycle()
+
+    # Get a fresh connection after the pipeline completes (avoids SQLite thread issues)
+    conn = get_conn()
 
     meta = _latest_run(conn)
     run_id = meta.get("run_id")
